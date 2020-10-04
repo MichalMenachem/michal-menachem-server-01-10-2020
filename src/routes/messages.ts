@@ -6,8 +6,6 @@ class MessagesManager {
   private idMessageMap: Map<string, MessageWithId[]> = new Map();
   private idCounter = 0;
 
-  // TODO: userId should not be of type any, so does messageId
-
   /**
    * get all messages by user id
    */
