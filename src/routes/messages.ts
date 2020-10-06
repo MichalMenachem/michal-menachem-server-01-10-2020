@@ -2,21 +2,28 @@ import express, { Request, Response } from "express";
 import { Message, MessageWithId } from "../models/message";
 const router = express.Router();
 
+interface Inbox {
+  received: MessageWithId[];
+  sent: MessageWithId[];
+}
+
 class MessagesManager {
-  private idMessageMap: Map<string, MessageWithId[]> = new Map();
+  private sentMessagesMap: Map<string, MessageWithId[]> = new Map();
+  private receivedMessagesMap: Map<string, MessageWithId[]> = new Map();
   private idCounter = 0;
 
   /**
-   * get all messages by user id
+   * get all messages sent or received by the user
    */
   public getAll = (
-    req: Request<{ userId: string }, MessageWithId[], {}>,
-    res: Response<MessageWithId[]>
+    req: Request<{ userId: string }, Inbox, {}>,
+    res: Response<Inbox>
   ) => {
-    const userMessages = this.idMessageMap.get(req.params.userId);
-    userMessages
-      ? res.status(200).json(userMessages)
-      : res.status(200).json([]);
+    const receivedMessages = this.receivedMessagesMap.get(req.params.userId);
+    const sentMessages = this.sentMessagesMap.get(req.params.userId);
+    res
+      .status(200)
+      .json({ sent: sentMessages || [], received: receivedMessages || [] });
   };
 
   /**
@@ -29,9 +36,12 @@ class MessagesManager {
     const userId = req.params.userId;
     const messageWithId = { ...req.body, id: this.idCounter };
     this.idCounter++;
-    this.idMessageMap.has(userId)
-      ? this.idMessageMap.get(userId).push(messageWithId)
-      : this.idMessageMap.set(userId, [messageWithId]);
+    this.addMessageToMap(this.sentMessagesMap, userId, messageWithId);
+    this.addMessageToMap(
+      this.receivedMessagesMap,
+      messageWithId.receiver,
+      messageWithId
+    );
     res.status(200).json(messageWithId);
   };
 
@@ -39,25 +49,60 @@ class MessagesManager {
    * delete a message
    */
   public deleteMessage = (
-    req: Request<{ userId: string; messageId: string }, MessageWithId, {}>,
+    req: Request<
+      { userId: string; messageId: string },
+      MessageWithId | { error: string },
+      {}
+    >,
     res: Response<MessageWithId | { error: string }>
   ) => {
-    const userId = req.params.userId;
-    const userMessages = this.idMessageMap.get(userId);
-    if (userMessages !== undefined) {
-      const indexToDelete = userMessages.findIndex(
-        (message) => message.id === parseInt(req.params.messageId, 10)
-      );
-      if (indexToDelete === -1) {
-        res.status(400).json({ error: "No such message" });
-      } else {
-        const deletedMessage = userMessages.splice(indexToDelete, 1);
-        res.status(200).json(deletedMessage[0]);
-      }
+    const { userId, messageId } = req.params;
+    const deletedFromReceived = this.deleteMessageFromMap(
+      this.receivedMessagesMap,
+      userId,
+      messageId
+    );
+    const deletedFromSent = this.deleteMessageFromMap(
+      this.sentMessagesMap,
+      userId,
+      messageId
+    );
+    if (deletedFromReceived === undefined && deletedFromSent === undefined) {
+      res.status(400).json({ error: "Message or user not found" });
     } else {
-      res.status(400).json({ error: "No such user" });
+      res.status(200).json(deletedFromReceived || deletedFromSent);
     }
   };
+
+  private deleteMessageFromMap(
+    messagesMap: Map<string, MessageWithId[]>,
+    userId: string,
+    messageId: string
+  ) {
+    const messages = messagesMap.get(userId);
+    if (messages !== undefined) {
+      const indexToDelete = messages.findIndex(
+        (message) => message.id === parseInt(messageId, 10)
+      );
+      if (indexToDelete !== -1) {
+        const deletedMessage = messages.splice(indexToDelete, 1);
+        return deletedMessage[0];
+      }
+    }
+    return undefined;
+  }
+
+  private addMessageToMap(
+    messagesMap: Map<string, MessageWithId[]>,
+    userId: string,
+    messageWithId: MessageWithId
+  ) {
+    if (messagesMap.has(userId)) {
+      messagesMap.get(userId).push(messageWithId);
+    } else {
+      messagesMap.set(userId, [messageWithId]);
+    }
+  }
 }
 
 const manager = new MessagesManager();
